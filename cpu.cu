@@ -84,12 +84,12 @@ int main()
     vector<uint8_t> next(WIDTH * HEIGHT);
 
     mt19937 rng(67);
-    uniform_int_distribution<int> dist(0, 1);
+    uniform_int_distribution<int> dist(0, 15); //決定alive細胞的比例
 
     // random initialization
     for (auto& cell : current)
     {
-        cell = dist(rng);
+        cell = (dist(rng) == 0) ? 1 : 0;
     }
     const uint8_t* currentGrid;
     uint8_t* nextGrid;
