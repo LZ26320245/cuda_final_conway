@@ -1,8 +1,5 @@
-Makefiles
-*.o
-*.out
-*.exe
-build/
-bin/
-cpu
-output/
+*
+!*.cu
+!*.cpp
+!*.c
+!*.py
