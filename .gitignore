@@ -1,5 +1,8 @@
+Makefiles
 *.o
 *.out
 *.exe
 build/
 bin/
+cpu
+output/
