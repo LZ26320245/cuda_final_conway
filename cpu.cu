@@ -32,6 +32,7 @@ int countNeighbors(
             int nx = x + dx;
             int ny = y + dy;
 
+            // 邊界採用循環邊界(最左邊會循環到最右邊，最上面會循環到最下面)
             if (nx<0){
                 nx = nx+WIDTH;
             }
@@ -76,7 +77,7 @@ void saveGrid(
 
 int main()
 {
-    string outputFolder = "output";
+    string outputFolder = "output_cpu";
 
     fs::create_directory(outputFolder);
 
@@ -84,18 +85,20 @@ int main()
     vector<uint8_t> next(WIDTH * HEIGHT);
 
     mt19937 rng(67);
-    uniform_int_distribution<int> dist(0, 15); //決定alive細胞的比例
+    uniform_int_distribution<int> dist(0, 12); //決定alive細胞的比例
 
     // random initialization
     for (auto& cell : current)
     {
         cell = (dist(rng) == 0) ? 1 : 0;
     }
+
+    // 迭代更新採用 current和next swap的方式 節省記憶體空間
     const uint8_t* currentGrid;
     uint8_t* nextGrid;
-    auto start = chrono::high_resolution_clock::now();
     saveGrid(current, 0, outputFolder);
     
+    auto start = chrono::high_resolution_clock::now();
     for (int iter = 1; iter <= ITERATIONS; iter++)
     {
         currentGrid = current.data();
@@ -128,8 +131,6 @@ int main()
         saveGrid(next, iter, outputFolder);
 
         swap(current, next);
-
-        cout<< "Iteration "<< iter<< " completed\n";
     }
     auto end = chrono::high_resolution_clock::now();
 
