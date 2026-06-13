@@ -8,17 +8,9 @@
 #include <sstream>
 #include <chrono>
 using namespace std;
-
-constexpr int WIDTH = 512;
-constexpr int HEIGHT = 512;
-constexpr int ITERATIONS = 100;
-
 namespace fs = std::filesystem;
 
-int countNeighbors(
-    const uint8_t* grid,
-    int x,
-    int y)
+int countNeighbors(const uint8_t* grid,int x,int y,int width,int height)
 {
     int count = 0;
 
@@ -32,51 +24,54 @@ int countNeighbors(
             int nx = x + dx;
             int ny = y + dy;
 
-            // 邊界採用循環邊界(最左邊會循環到最右邊，最上面會循環到最下面)
-            if (nx<0){
-                nx = nx+WIDTH;
-            }
-            else if (nx>=WIDTH){
-                nx = nx-WIDTH;
-            }
+            if (nx < 0)
+                nx += width;
+            else if (nx >= width)
+                nx -= width;
 
-            if (ny<0){
-                ny = ny+HEIGHT;
-            }
-            else if (ny>=HEIGHT){
-                ny = ny-HEIGHT;
-            }
+            if (ny < 0)
+                ny += height;
+            else if (ny >= height)
+                ny -= height;
 
-            count += grid[ny * WIDTH + nx];
+            count += grid[ny * width + nx];
         }
     }
 
     return count;
 }
 
-void saveGrid(
-    const vector<uint8_t>& grid,
-    int iteration,
-    const string& folder)
+void saveGrid(const vector<uint8_t>& grid,int iteration,const string& folder,int width,int height)
 {
     ostringstream filename;
 
-    filename << folder << "/iter_" << setw(3) << setfill('0') << iteration << ".txt";
+    filename << folder<< "/iter_"<< setw(3)<< setfill('0')<< iteration<< ".txt";
 
     ofstream out(filename.str());
 
-    for (int y = 0; y < HEIGHT; y++)
+    for (int y = 0; y < height; y++)
     {
-        for (int x = 0; x < WIDTH; x++)
+        for (int x = 0; x < width; x++)
         {
-            out << int(grid[y * WIDTH + x]);
+            out << int(grid[y * width + x]);
         }
         out << '\n';
     }
 }
 
-int main()
+int main(int argc, char* argv[])
 {
+    if (argc != 4)
+    {
+        cout << "Usage:\n";
+        cout << argv[0] << " WIDTH HEIGHT ITERATIONS\n";
+        return 1;
+    }
+
+    int WIDTH = stoi(argv[1]);
+    int HEIGHT = stoi(argv[2]);
+    int ITERATIONS = stoi(argv[3]);
+
     string outputFolder = "output_cpu";
 
     fs::create_directory(outputFolder);
@@ -85,57 +80,54 @@ int main()
     vector<uint8_t> next(WIDTH * HEIGHT);
 
     mt19937 rng(67);
-    uniform_int_distribution<int> dist(0, 12); //決定alive細胞的比例
+    uniform_int_distribution<int> dist(0, 12);
 
-    // random initialization
     for (auto& cell : current)
     {
         cell = (dist(rng) == 0) ? 1 : 0;
     }
 
-    // 迭代更新採用 current和next swap的方式 節省記憶體空間
     const uint8_t* currentGrid;
     uint8_t* nextGrid;
-    saveGrid(current, 0, outputFolder);
-    
+
+    saveGrid(current,0,outputFolder,WIDTH,HEIGHT);
+
     auto start = chrono::high_resolution_clock::now();
+
     for (int iter = 1; iter <= ITERATIONS; iter++)
     {
         currentGrid = current.data();
         nextGrid = next.data();
+
         for (int y = 0; y < HEIGHT; y++)
         {
             for (int x = 0; x < WIDTH; x++)
             {
                 int idx = y * WIDTH + x;
 
-                int neighbors = countNeighbors(currentGrid, x, y);
+                int neighbors = countNeighbors(currentGrid,x,y,WIDTH,HEIGHT);
 
-                if (currentGrid[idx] == 1)
+                if (currentGrid[idx])
                 {
-                    if (neighbors == 2 || neighbors == 3)
-                        nextGrid[idx] = 1;
-                    else
-                        nextGrid[idx] = 0;
+                    nextGrid[idx] = (neighbors == 2 || neighbors == 3);
                 }
                 else
                 {
-                    if (neighbors == 3)
-                        nextGrid[idx] = 1;
-                    else
-                        nextGrid[idx] = 0;
+                    nextGrid[idx] = (neighbors == 3);
                 }
             }
         }
 
-        saveGrid(next, iter, outputFolder);
+        saveGrid(next,iter,outputFolder,WIDTH,HEIGHT);
 
         swap(current, next);
     }
+
     auto end = chrono::high_resolution_clock::now();
 
     double elapsed = chrono::duration<double, milli>(end - start).count();
 
-    cout<<"\nExecution Time: "<< elapsed << " ms\n";
+    cout << "\nExecution Time: " << elapsed << " ms\n";
+
     return 0;
 }
