@@ -29,17 +29,17 @@ void saveGrid(const vector<uint8_t>& grid,int iteration,const string& folder,int
     }
 }
 
-__global__ void conwayKernel(const uint8_t* current,uint8_t* next,int width,int height)
+__global__ void conwayKernel(const uint8_t* current,uint8_t* next,int width,int height, int coarsen)
 {
     extern __shared__ uint8_t tile[];
 
     int tx = threadIdx.x;
     int ty = threadIdx.y;
 
-    int x = blockIdx.x * blockDim.x + tx;
+    int xstart = (blockIdx.x * blockDim.x + tx) * coarsen;
     int y = blockIdx.y * blockDim.y + ty;
 
-    int sharedWidth = blockDim.x + 2;
+    int sharedWidth = blockDim.x*coarsen + 2;
     int sharedHeight = blockDim.y + 2;
     int tileSize = sharedWidth * sharedHeight;
 
@@ -51,7 +51,7 @@ __global__ void conwayKernel(const uint8_t* current,uint8_t* next,int width,int 
         int sx = i % sharedWidth;
         int sy = i / sharedWidth;
 
-        int gx = blockIdx.x * blockDim.x + sx - 1;
+        int gx = blockIdx.x * blockDim.x * coarsen + sx - 1;
         int gy = blockIdx.y * blockDim.y + sy - 1;
 
         if(gx < 0)
@@ -68,44 +68,51 @@ __global__ void conwayKernel(const uint8_t* current,uint8_t* next,int width,int 
 
     __syncthreads();
 
-    if (x >= width || y >= height)
+    if (y >= height)
         return;
 
-    int sx = tx + 1;
-    int sy = ty + 1;
-
-    int count = tile[(sy-1)*sharedWidth + (sx-1)] + tile[(sy-1)*sharedWidth + sx] + tile[(sy-1)*sharedWidth + (sx+1)] +
-                tile[ sy   *sharedWidth + (sx-1)] + tile[ sy   *sharedWidth + (sx+1)] +
-                tile[(sy+1)*sharedWidth + (sx-1)] + tile[(sy+1)*sharedWidth + sx] + tile[(sy+1)*sharedWidth + (sx+1)];
-
-    int idx = y * width + x;
-
-    uint8_t alive = tile[sy * sharedWidth + sx];
-
-    if(alive)
+    for(int c=0; c<coarsen; c++)
     {
-        next[idx] = (count == 2 || count == 3);
-    }
-    else
-    {
-        next[idx] = (count == 3);
+        int x = xstart + c;
+        if(x>=width)
+            break;
+
+        int sx = tx*coarsen + c + 1;
+        int sy = ty + 1;
+        int count = tile[(sy-1)*sharedWidth + (sx-1)] + tile[(sy-1)*sharedWidth + sx] + tile[(sy-1)*sharedWidth + (sx+1)] +
+                    tile[ sy   *sharedWidth + (sx-1)] + tile[ sy   *sharedWidth + (sx+1)] +
+                    tile[(sy+1)*sharedWidth + (sx-1)] + tile[(sy+1)*sharedWidth + sx] + tile[(sy+1)*sharedWidth + (sx+1)];
+        
+        int idx = y * width + x;
+
+        uint8_t alive = tile[sy * sharedWidth + sx];
+
+        if(alive)
+        {
+            next[idx] = (count == 2 || count == 3);
+        }
+        else
+        {
+            next[idx] = (count == 3);
+        }
     }
 }
 
 int main(int argc, char* argv[])
 {
-    if (argc != 6)
+    if (argc != 7)
     {
         cout << "Usage:\n";
         cout << argv[0] << " WIDTH HEIGHT ITERATIONS BLOCK_X BLOCK_Y\n";
         return 1;
     }
 
-    int WIDTH      = stoi(argv[1]);
-    int HEIGHT     = stoi(argv[2]);
+    int WIDTH = stoi(argv[1]);
+    int HEIGHT = stoi(argv[2]);
     int ITERATIONS = stoi(argv[3]);
-    int BLOCK_X    = stoi(argv[4]);
-    int BLOCK_Y    = stoi(argv[5]);
+    int BLOCK_X = stoi(argv[4]);
+    int BLOCK_Y = stoi(argv[5]);
+    int coarsen = stoi(argv[6]);
 
     string outputFolder = "output_gpu_v2";
 
@@ -140,15 +147,15 @@ int main(int argc, char* argv[])
 
     dim3 block(BLOCK_X, BLOCK_Y);
 
-    dim3 grid((WIDTH + BLOCK_X - 1) / BLOCK_X,(HEIGHT + BLOCK_Y - 1) / BLOCK_Y);
+    dim3 grid((WIDTH + BLOCK_X*coarsen - 1) / (BLOCK_X*coarsen),(HEIGHT + BLOCK_Y - 1) / BLOCK_Y);
 
-    size_t sharedBytes =(BLOCK_X + 2)*(BLOCK_Y + 2)*sizeof(uint8_t);
+    size_t sharedBytes =(BLOCK_X*coarsen + 2)*(BLOCK_Y + 2)*sizeof(uint8_t);
 
     cudaEventRecord(start);
 
     for (int iter = 1; iter <= ITERATIONS; iter++)
     {
-        conwayKernel<<<grid, block, sharedBytes>>>(d_current,d_next,WIDTH,HEIGHT);
+        conwayKernel<<<grid, block, sharedBytes>>>(d_current,d_next,WIDTH,HEIGHT,coarsen);
 
         cudaDeviceSynchronize();
 

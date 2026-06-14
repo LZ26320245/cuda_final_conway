@@ -29,67 +29,76 @@ void saveGrid(const vector<uint8_t>& grid,int iteration,const string& folder,int
     }
 }
 
-__global__ void conwayKernel(const uint8_t* current,uint8_t* next,int width,int height)
+__global__ void conwayKernel(const uint8_t* current,uint8_t* next,int width,int height, int coarsen)
 {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int xStart = (blockIdx.x * blockDim.x + threadIdx.x) * coarsen;
+
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (x >= width || y >= height)
+    if(y >= height)
         return;
 
-    int count = 0;
-
-    for (int dy = -1; dy <= 1; dy++)
+    for(int c = 0; c < coarsen; c++)
     {
-        for (int dx = -1; dx <= 1; dx++)
+        int x = xStart + c;
+
+        if(x >= width)
+            break;
+
+        int count = 0;
+
+        for(int dy = -1; dy <= 1; dy++)
         {
-            if (dx == 0 && dy == 0)
-                continue;
+            for(int dx = -1; dx <= 1; dx++)
+            {
+                if(dx == 0 && dy == 0)
+                    continue;
 
-            int nx = x + dx;
-            int ny = y + dy;
+                int nx = x + dx;
+                int ny = y + dy;
 
-            // 邊界採用循環邊界(最左邊會循環到最右邊，最上面會循環到最下面)
-            if (nx < 0)
-                nx += width;
-            else if (nx >= width)
-                nx -= width;
+                if(nx < 0)
+                    nx += width;
+                else if(nx >= width)
+                    nx -= width;
 
-            if (ny < 0)
-                ny += height;
-            else if (ny >= height)
-                ny -= height;
+                if(ny < 0)
+                    ny += height;
+                else if(ny >= height)
+                    ny -= height;
 
-            count += current[ny * width + nx];
+                count += current[ny * width + nx];
+            }
         }
-    }
 
-    int idx = y * width + x;
+        int idx = y * width + x;
 
-    if (current[idx])
-    {
-        next[idx] = (count == 2 || count == 3);
-    }
-    else
-    {
-        next[idx] = (count == 3);
+        if(current[idx])
+        {
+            next[idx] = (count == 2 || count == 3);
+        }
+        else
+        {
+            next[idx] = (count == 3);
+        }
     }
 }
 
 int main(int argc, char* argv[])
 {
-    if (argc != 6)
+    if (argc != 7)
     {
         cout << "Usage:\n";
         cout << argv[0] << " WIDTH HEIGHT ITERATIONS BLOCK_X BLOCK_Y\n";
         return 1;
     }
 
-    int WIDTH      = stoi(argv[1]);
-    int HEIGHT     = stoi(argv[2]);
+    int WIDTH = stoi(argv[1]);
+    int HEIGHT = stoi(argv[2]);
     int ITERATIONS = stoi(argv[3]);
-    int BLOCK_X    = stoi(argv[4]);
-    int BLOCK_Y    = stoi(argv[5]);
+    int BLOCK_X = stoi(argv[4]);
+    int BLOCK_Y = stoi(argv[5]);
+    int coarsen = stoi(argv[6]);
 
     string outputFolder = "output_gpu_v1";
 
@@ -124,13 +133,13 @@ int main(int argc, char* argv[])
 
     dim3 block(BLOCK_X, BLOCK_Y);
 
-    dim3 grid((WIDTH + BLOCK_X - 1) / BLOCK_X,(HEIGHT + BLOCK_Y - 1) / BLOCK_Y);
+    dim3 grid((WIDTH + BLOCK_X * coarsen - 1) / (BLOCK_X*coarsen),(HEIGHT + BLOCK_Y - 1) / BLOCK_Y);
 
     cudaEventRecord(start);
 
     for (int iter = 1; iter <= ITERATIONS; iter++)
     {
-        conwayKernel<<<grid, block>>>(d_current,d_next,WIDTH,HEIGHT);
+        conwayKernel<<<grid, block>>>(d_current,d_next,WIDTH,HEIGHT,coarsen);
 
         cudaDeviceSynchronize();
 
