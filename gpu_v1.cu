@@ -157,6 +157,7 @@ int main(int argc, char* argv[])
     cudaEventElapsedTime(&elapsed, start, stop);
 
     cout << "\nExecution Time: "<< elapsed << " ms\n";
+    cout << "Throughput: " << (double)WIDTH * HEIGHT * ITERATIONS / elapsed / 1e6 << " Gcells/s\n";
 
     cudaFree(d_current);
     cudaFree(d_next);
