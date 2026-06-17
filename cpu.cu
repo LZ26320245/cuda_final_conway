@@ -118,7 +118,7 @@ int main(int argc, char* argv[])
             }
         }
 
-        saveGrid(next,iter,outputFolder,WIDTH,HEIGHT);
+        // saveGrid(next,iter,outputFolder,WIDTH,HEIGHT);
 
         swap(current, next);
     }
@@ -128,6 +128,7 @@ int main(int argc, char* argv[])
     double elapsed = chrono::duration<double, milli>(end - start).count();
 
     cout << "\nExecution Time: " << elapsed << " ms\n";
+    cout << "Throughput: " << (double)WIDTH * HEIGHT * ITERATIONS / elapsed / 1e6 << " Gcells/s\n";
 
     return 0;
 }

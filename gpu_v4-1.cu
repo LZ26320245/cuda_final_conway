@@ -162,8 +162,6 @@ int main(int argc, char* argv[])
     dim3 block(BLOCK_X, BLOCK_Y);
     dim3 grid((packed_width + BLOCK_X*coarsen - 1) / (BLOCK_X*coarsen),(HEIGHT + BLOCK_Y - 1) / BLOCK_Y);
 
-    size_t sharedBytes = (BLOCK_X*coarsen + 2) * (BLOCK_Y + 2) * sizeof(uint32_t);
-
     cudaEventRecord(start);
 
     for (int iter = 1; iter <= ITERATIONS; iter++)
