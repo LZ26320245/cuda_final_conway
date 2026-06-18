@@ -50,8 +50,11 @@ void saveGrid(const vector<uint8_t>& energy,
 //   6. Birth                   : dead cell checks potential energy = neighbours*2 + potential
 //                                  8 <= pe <= 14 → born, energy = min(pe-2, 15)
 
-// HALO = 3: 5x5 scatter 的鄰居需要讀自己的 3x3，所以最遠需要 5/2+1 = 3 格 halo
-#define HALO 3
+// HALO = 5:
+// tentative(dx,dy) 內部讀 se(dx+dx2, dy+dy2)，dx2 最大 1，所以最遠讀到 dx+1
+// alive_in_5x5 計算時呼叫 tentative(dx+dx2, dy+dy2)，dx 最大 2，dx2 最大 2，
+// tentative 內部再讀 dx3 最大 1，所以最遠讀到 2+2+1 = 5
+#define HALO 5
 
 __global__ void energyLifeKernel(
     const uint8_t* __restrict__ cur_energy,
@@ -65,12 +68,12 @@ __global__ void energyLifeKernel(
     // 兩個 tile 放在同一塊 shared memory，energy 在前，potential 在後
     extern __shared__ uint8_t smem[];
 
-    int sw = blockDim.x + 2 * HALO;  // shared memory 的行寬
-    int sh = blockDim.y + 2 * HALO;  // shared memory 的行高
+    int sw = blockDim.x + 2 * HALO;
+    int sh = blockDim.y + 2 * HALO;
     int tileSize = sw * sh;
 
-    uint8_t* tile_e = smem;              // energy tile
-    uint8_t* tile_p = smem + tileSize;   // potential tile
+    uint8_t* tile_e = smem;
+    uint8_t* tile_p = smem + tileSize;
 
     int tx = threadIdx.x;
     int ty = threadIdx.y;
@@ -86,9 +89,8 @@ __global__ void energyLifeKernel(
         int col = blockIdx.x * blockDim.x + sx - HALO;
         int row = blockIdx.y * blockDim.y + sy - HALO;
 
-        // 循環邊界
-        if (col < 0)          col += width;
-        else if (col >= width) col -= width;
+        if (col < 0)           col += width;
+        else if (col >= width)  col -= width;
         if (row < 0)           row += height;
         else if (row >= height) row -= height;
 
@@ -110,8 +112,7 @@ __global__ void energyLifeKernel(
     int sx0 = tx + HALO;
     int sy0 = ty + HALO;
 
-    // ── shared memory 讀取 helper（直接用 shared index，不需要 wrap）─────────
-    // 因為 halo 已經包含了循環邊界的資料，所以 [-HALO, HALO] 範圍內直接讀即可
+    // shared memory 讀取 helper：offset (dx,dy) 相對於當前 cell
     auto se = [&](int dx, int dy) -> int {
         return tile_e[(sy0 + dy) * sw + (sx0 + dx)];
     };
@@ -120,7 +121,8 @@ __global__ void energyLifeKernel(
     uint8_t my_potential = tile_p[sy0 * sw + sx0];
 
     // ── tentative：預測鄰居 (dx,dy) 跑完 Step1~3 後的能量 ───────────────────
-    // 完全從 shared memory 讀取，不碰 global memory
+    // 最遠存取 se(dx+1, dy+1)，dx 最大 4（由 alive_in_5x5 呼叫時帶入 dx+dx2），
+    // +1 = 5，剛好在 HALO=5 的範圍內
     auto tentative = [&](int dx, int dy) -> int {
         int e = se(dx, dy);
         if (e == 0) return 0;
@@ -161,7 +163,7 @@ __global__ void energyLifeKernel(
         int te = tentative(dx, dy);
         if (te > 0) continue;           // not dying this step
 
-        // 這個鄰居這步會死，計算它 5×5 內還活著的 cell 數
+        // 計算這個死亡鄰居的 5×5 內還活著的 cell 數
         int alive_in_5x5 = 0;
         for (int dy2 = -2; dy2 <= 2; dy2++)
         for (int dx2 = -2; dx2 <= 2; dx2++) {
@@ -252,14 +254,30 @@ int main(int argc, char* argv[])
         for (int i = 0; i < (int)N; i++)
             if (dist(rng) == 0) h_energy[i] = 10;
     }
+    else if (INIT_MODE == 2){
+        int cx = WIDTH / 2, cy = HEIGHT / 2, r = min(WIDTH, HEIGHT) / 4;
+        for (int y = 0; y < HEIGHT; y++)
+            for (int x = 0; x < WIDTH; x++)
+                h_energy[y * WIDTH + x] = ((x-cx)*(x-cx) + (y-cy)*(y-cy) <= r*r) ? 1 : 0;
+    }
     else {
         // Two solid blocks: top-left and bottom-right
         int bs = min(WIDTH, HEIGHT) / 4;
-        int tl_x = WIDTH  / 4 - bs / 2, tl_y = HEIGHT / 4 - bs / 2;
-        int br_x = 3*WIDTH/ 4 - bs / 2, br_y = 3*HEIGHT/4 - bs / 2;
+        int gap = 15;  // 兩個方塊之間的間距，可調整
+
+        // 兩個方塊沿對角線排列，以畫面中心為基準往兩側偏移
+        // 左上方塊：右下角在中心左上方 gap/2 處
+        int tl_x = WIDTH  / 2 - gap / 2 - bs;
+        int tl_y = HEIGHT / 2 - gap / 2 - bs;
+
+        // 右下方塊：左上角在中心右下方 gap/2 處
+        int br_x = WIDTH  / 2 + gap / 2;
+        int br_y = HEIGHT / 2 + gap / 2;
+
         for (int y = tl_y; y < tl_y + bs; y++)
             for (int x = tl_x; x < tl_x + bs; x++)
                 h_energy[y * WIDTH + x] = 10;
+
         for (int y = br_y; y < br_y + bs; y++)
             for (int x = br_x; x < br_x + bs; x++)
                 h_energy[y * WIDTH + x] = 10;
@@ -289,26 +307,24 @@ int main(int argc, char* argv[])
     dim3 grid((WIDTH  + BLOCK_X - 1) / BLOCK_X,
               (HEIGHT + BLOCK_Y - 1) / BLOCK_Y);
 
-    // 每個 tile = (BLOCK_X + 2*HALO) * (BLOCK_Y + 2*HALO)，兩個 tile：energy + potential
-    size_t sharedBytes = 2 * (size_t)(BLOCK_X + 2*3) * (BLOCK_Y + 2*3) * sizeof(uint8_t);
+    // tile = (BLOCK_X + 2*5) * (BLOCK_Y + 2*5)，兩個 tile：energy + potential
+    // 以 16x16 block 為例：2 * 26 * 26 = 1352 bytes，遠小於 48KB 上限
+    size_t sharedBytes = 2 * (size_t)(BLOCK_X + 2*HALO) * (BLOCK_Y + 2*HALO) * sizeof(uint8_t);
 
     // ── Simulation loop ───────────────────────────────────────────────────────
     cudaEventRecord(ev_start);
 
     for (int iter = 1; iter <= ITERATIONS; iter++)
     {
-        energyLifeKernel<<<grid, block, sharedBytes>>>(
-            d_energy_cur, d_potential_cur,
-            d_energy_nxt, d_potential_nxt,
-            WIDTH, HEIGHT);
+        energyLifeKernel<<<grid, block, sharedBytes>>>(d_energy_cur, d_potential_cur, d_energy_nxt, d_potential_nxt, WIDTH, HEIGHT);
 
         cudaDeviceSynchronize();
 
         swap(d_energy_cur,    d_energy_nxt);
         swap(d_potential_cur, d_potential_nxt);
 
-        cudaMemcpy(h_energy.data(), d_energy_cur, N, cudaMemcpyDeviceToHost);
-        saveGrid(h_energy, iter, outputFolder, WIDTH, HEIGHT);
+        // cudaMemcpy(h_energy.data(), d_energy_cur, N, cudaMemcpyDeviceToHost);
+        // saveGrid(h_energy, iter, outputFolder, WIDTH, HEIGHT);
     }
 
     cudaEventRecord(ev_stop);
@@ -317,6 +333,7 @@ int main(int argc, char* argv[])
     float elapsed;
     cudaEventElapsedTime(&elapsed, ev_start, ev_stop);
     cout << "\nExecution Time: " << elapsed << " ms\n";
+    cout << "Throughput: " << (double)WIDTH * HEIGHT * ITERATIONS / elapsed / 1e6 << " Gcells/s\n";
 
     cudaFree(d_energy_cur);    cudaFree(d_energy_nxt);
     cudaFree(d_potential_cur); cudaFree(d_potential_nxt);

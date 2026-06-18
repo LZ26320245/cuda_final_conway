@@ -263,6 +263,12 @@ int main(int argc, char* argv[])
         for (int i = 0; i < (int)N; i++)
             if (dist(rng) == 0) h_energy[i] = 10;
     }
+    else if (INIT_MODE == 2){
+        int cx = WIDTH / 2, cy = HEIGHT / 2, r = min(WIDTH, HEIGHT) / 4;
+        for (int y = 0; y < HEIGHT; y++)
+            for (int x = 0; x < WIDTH; x++)
+                h_energy[y * WIDTH + x] = ((x-cx)*(x-cx) + (y-cy)*(y-cy) <= r*r) ? 1 : 0;
+    }
     else {
         // Two solid blocks: top-left and bottom-right
         int bs = min(WIDTH, HEIGHT) / 4;
@@ -315,8 +321,8 @@ int main(int argc, char* argv[])
         swap(d_energy_cur,    d_energy_nxt);
         swap(d_potential_cur, d_potential_nxt);
 
-        cudaMemcpy(h_energy.data(), d_energy_cur, N, cudaMemcpyDeviceToHost);
-        saveGrid(h_energy, iter, outputFolder, WIDTH, HEIGHT);
+        // cudaMemcpy(h_energy.data(), d_energy_cur, N, cudaMemcpyDeviceToHost);
+        // saveGrid(h_energy, iter, outputFolder, WIDTH, HEIGHT);
     }
 
     cudaEventRecord(ev_stop);
@@ -325,6 +331,7 @@ int main(int argc, char* argv[])
     float elapsed;
     cudaEventElapsedTime(&elapsed, ev_start, ev_stop);
     cout << "\nExecution Time: " << elapsed << " ms\n";
+    cout << "Throughput: " << (double)WIDTH * HEIGHT * ITERATIONS / elapsed / 1e6 << " Gcells/s\n";
 
     cudaFree(d_energy_cur);    cudaFree(d_energy_nxt);
     cudaFree(d_potential_cur); cudaFree(d_potential_nxt);

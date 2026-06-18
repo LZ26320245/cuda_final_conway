@@ -42,14 +42,6 @@ void saveGrid(const vector<uint8_t>& grid, int iteration, const string& folder, 
     }
 }
 
-__device__ __forceinline__
-void addBit(uint32_t b, uint32_t& ones, uint32_t& twos)
-{
-    uint32_t carry = ones & b;
-    ones  ^= b;
-    twos  |= carry;
-}
-
 __global__ void conwayKernel(const uint32_t* __restrict__ current, uint32_t* __restrict__ next, int packed_width, int height, int coarsen)
 {
     int tx = threadIdx.x;
@@ -65,15 +57,14 @@ __global__ void conwayKernel(const uint32_t* __restrict__ current, uint32_t* __r
         int gx = gx_start + c;
         if (gx >= packed_width) break;
 
-        // 計算上下行的 row index（含循環邊界）
+        // 上下 row index
         int row_above = (gy == 0)          ? height - 1 : gy - 1;
         int row_below = (gy == height - 1) ? 0          : gy + 1;
 
-        // 計算左右 word index（含循環邊界）
+        // 左右 word index
         int col_L = (gx == 0)               ? packed_width - 1 : gx - 1;
         int col_R = (gx == packed_width - 1) ? 0               : gx + 1;
 
-        // 直接從 global memory 讀 9 個 word
         uint32_t row_above_L = current[row_above * packed_width + col_L];
         uint32_t row_above_C = current[row_above * packed_width + gx   ];
         uint32_t row_above_R = current[row_above * packed_width + col_R];
@@ -136,13 +127,40 @@ int main(int argc, char* argv[])
 
     int packed_width = (WIDTH + 31) / 32;
 
-    string outputFolder = "output_gpu_v4-1";
+    string outputFolder = "output_gpu_v4-1_square1";
     fs::create_directory(outputFolder);
 
     vector<uint8_t> flat(WIDTH * HEIGHT);
     mt19937 rng(67);
-    uniform_int_distribution<int> dist(0, 12);
-    for (auto& c : flat) c = (dist(rng) == 0) ? 1 : 0;
+    //uniform_int_distribution<int> dist(0, 9);
+    //uniform_int_distribution<int> dist(0, 2);
+    //for (auto& c : flat) c = (dist(rng) == 0) ? 1 : 0;
+
+    // int cx = WIDTH / 2, cy = HEIGHT / 2, r = min(WIDTH, HEIGHT) / 4;
+    // for (int y = 0; y < HEIGHT; y++)
+    //     for (int x = 0; x < WIDTH; x++)
+    //         flat[y * WIDTH + x] = ((x-cx)*(x-cx) + (y-cy)*(y-cy) <= r*r) ? 1 : 0;
+
+    // Two solid blocks: top-left and bottom-right
+    int bs = min(WIDTH, HEIGHT) / 4;
+    int gap = 8;  // 兩個方塊之間的間距，可調整
+
+    // 兩個方塊沿對角線排列，以畫面中心為基準往兩側偏移
+    // 左上方塊：右下角在中心左上方 gap/2 處
+    int tl_x = WIDTH  / 2 - gap / 2 - bs;
+    int tl_y = HEIGHT / 2 - gap / 2 - bs;
+
+    // 右下方塊：左上角在中心右下方 gap/2 處
+    int br_x = WIDTH  / 2 + gap / 2;
+    int br_y = HEIGHT / 2 + gap / 2;
+
+    for (int y = tl_y; y < tl_y + bs; y++)
+        for (int x = tl_x; x < tl_x + bs; x++)
+            flat[y * WIDTH + x] = 1;
+
+    for (int y = br_y; y < br_y + bs; y++)
+        for (int x = br_x; x < br_x + bs; x++)
+            flat[y * WIDTH + x] = 1;
 
     vector<uint32_t> packed;
     packGrid(flat, packed, WIDTH, HEIGHT);
@@ -168,13 +186,13 @@ int main(int argc, char* argv[])
     {
         conwayKernel<<<grid, block>>>(d_cur, d_nxt, packed_width, HEIGHT, coarsen);
 
-        // cudaDeviceSynchronize();
+        cudaDeviceSynchronize();
 
         swap(d_cur, d_nxt);
 
-        // cudaMemcpy(packed.data(), d_cur, bytes, cudaMemcpyDeviceToHost);
-        // unpackGrid(packed, flat, WIDTH, HEIGHT);
-        // saveGrid(flat, iter, outputFolder, WIDTH, HEIGHT);
+        cudaMemcpy(packed.data(), d_cur, bytes, cudaMemcpyDeviceToHost);
+        unpackGrid(packed, flat, WIDTH, HEIGHT);
+        saveGrid(flat, iter, outputFolder, WIDTH, HEIGHT);
     }
 
     cudaEventRecord(stop);

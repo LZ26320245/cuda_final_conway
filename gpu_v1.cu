@@ -109,6 +109,7 @@ int main(int argc, char* argv[])
 
     mt19937 rng(67);
     uniform_int_distribution<int> dist(0, 12);
+    uniform_int_distribution<int> dist(0, 2);
 
     for (auto& cell : current)
     {
@@ -141,13 +142,13 @@ int main(int argc, char* argv[])
     {
         conwayKernel<<<grid, block>>>(d_current,d_next,WIDTH,HEIGHT,coarsen);
 
-        //cudaDeviceSynchronize();
+        cudaDeviceSynchronize();
 
         swap(d_current, d_next);
 
-        // cudaMemcpy(current.data(),d_current,bytes,cudaMemcpyDeviceToHost);
+        cudaMemcpy(current.data(),d_current,bytes,cudaMemcpyDeviceToHost);
 
-        // saveGrid(current,iter,outputFolder,WIDTH,HEIGHT);
+        saveGrid(current,iter,outputFolder,WIDTH,HEIGHT);
     }
 
     cudaEventRecord(stop);

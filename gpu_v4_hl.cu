@@ -215,13 +215,13 @@ int main(int argc, char* argv[])
     {
         conwayKernel<<<grid, block, sharedBytes>>>(d_cur, d_nxt, packed_width, HEIGHT, coarsen);
 
-        cudaDeviceSynchronize();
+        //cudaDeviceSynchronize();
 
         swap(d_cur, d_nxt);
 
-        cudaMemcpy(packed.data(), d_cur, bytes, cudaMemcpyDeviceToHost);
-        unpackGrid(packed, flat, WIDTH, HEIGHT);
-        saveGrid(flat, iter, outputFolder, WIDTH, HEIGHT);
+        // cudaMemcpy(packed.data(), d_cur, bytes, cudaMemcpyDeviceToHost);
+        // unpackGrid(packed, flat, WIDTH, HEIGHT);
+        // saveGrid(flat, iter, outputFolder, WIDTH, HEIGHT);
     }
 
     cudaEventRecord(stop);

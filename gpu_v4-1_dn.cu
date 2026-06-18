@@ -52,91 +52,50 @@ void addBit(uint32_t b, uint32_t& ones, uint32_t& twos)
 
 __global__ void conwayKernel(const uint32_t* __restrict__ current, uint32_t* __restrict__ next, int packed_width, int height, int coarsen)
 {
-    // Shared memory tile
-    extern __shared__ uint32_t tile[];
-
-    int sw = blockDim.x * coarsen + 2;
-
     int tx = threadIdx.x;
     int ty = threadIdx.y;
 
     int gx_start = (blockIdx.x * blockDim.x + tx) * coarsen;
-    int gy = blockIdx.y * blockDim.y + ty; 
+    int gy       =  blockIdx.y * blockDim.y + ty;
 
-    // Load shared tile halo
-    int tileSize = sw * (blockDim.y + 2);
-    int tid      = ty * blockDim.x + tx;
-    int nthreads = blockDim.x * blockDim.y;
+    if (gy >= height) return;
 
-    for (int i = tid; i < tileSize; i += nthreads)
+    for (int c = 0; c < coarsen; c++)
     {
-        int sx = i % sw;
-        int sy = i / sw;
+        int gx = gx_start + c;
+        if (gx >= packed_width) break;
 
-        int col = blockIdx.x * blockDim.x * coarsen + sx - 1;
-        int row = blockIdx.y * blockDim.y + sy - 1;
+        // 計算上下行的 row index（含循環邊界）
+        int row_above = (gy == 0)          ? height - 1 : gy - 1;
+        int row_below = (gy == height - 1) ? 0          : gy + 1;
 
-        if (row < 0)       
-            row += height;
-        else if (row >= height) 
-            row -= height;
+        // 計算左右 word index（含循環邊界）
+        int col_L = (gx == 0)               ? packed_width - 1 : gx - 1;
+        int col_R = (gx == packed_width - 1) ? 0               : gx + 1;
 
-        uint32_t val;
-        if (col < 0) 
-        {
-            col += packed_width;
-            val  = current[row * packed_width + col];
-        } 
-        else if (col >= packed_width) 
-        {
-            col -= packed_width;
-            val  = current[row * packed_width + col];
-        } 
-        else 
-        {
-            val = current[row * packed_width + col];
-        }
+        // 直接從 global memory 讀 9 個 word
+        uint32_t row_above_L = current[row_above * packed_width + col_L];
+        uint32_t row_above_C = current[row_above * packed_width + gx   ];
+        uint32_t row_above_R = current[row_above * packed_width + col_R];
 
-        tile[i] = val;
-    }
+        uint32_t row_mid_L   = current[gy * packed_width + col_L];
+        uint32_t row_mid_C   = current[gy * packed_width + gx   ];
+        uint32_t row_mid_R   = current[gy * packed_width + col_R];
 
-    __syncthreads();
+        uint32_t row_below_L = current[row_below * packed_width + col_L];
+        uint32_t row_below_C = current[row_below * packed_width + gx   ];
+        uint32_t row_below_R = current[row_below * packed_width + col_R];
 
-    if (gy >= height)
-        return;
+        uint32_t a_L = (row_above_C << 1) | (row_above_L >> 31);
+        uint32_t a_C =  row_above_C;
+        uint32_t a_R = (row_above_C >> 1) | (row_above_R << 31);
 
-    int sy = ty + 1;
+        uint32_t m_L = (row_mid_C   << 1) | (row_mid_L   >> 31);
+        uint32_t m_R = (row_mid_C   >> 1) | (row_mid_R   << 31);
 
-    for(int c=0; c<coarsen; c++)
-    {
-        int gx = gx_start+c;
-        if(gx >= packed_width)
-            break;
-        
-        int sx = tx * coarsen + c + 1;
-
-        uint32_t row_above_L = tile[(sy-1)*sw + (sx-1)];
-        uint32_t row_above_C = tile[(sy-1)*sw +  sx   ];
-        uint32_t row_above_R = tile[(sy-1)*sw + (sx+1)];
-
-        uint32_t row_mid_L = tile[sy*sw + (sx-1)];
-        uint32_t row_mid_C = tile[sy*sw + sx];
-        uint32_t row_mid_R = tile[sy*sw + (sx+1)];
-
-        uint32_t row_below_L = tile[(sy+1)*sw + (sx-1)];
-        uint32_t row_below_C = tile[(sy+1)*sw + sx];
-        uint32_t row_below_R = tile[(sy+1)*sw + (sx+1)];
-
-        uint32_t a_L = (row_above_C << 1) | (row_above_L >> 31); // up-left
-        uint32_t a_C =  row_above_C;                              // up
-        uint32_t a_R = (row_above_C >> 1) | (row_above_R << 31); // up-right
-
-        uint32_t m_L = (row_mid_C   << 1) | (row_mid_L   >> 31); // left
-        uint32_t m_R = (row_mid_C   >> 1) | (row_mid_R   << 31); // right
-
-        uint32_t b_L = (row_below_C << 1) | (row_below_L >> 31); // down-left
-        uint32_t b_C =  row_below_C;                              // down
-        uint32_t b_R = (row_below_C >> 1) | (row_below_R << 31); // down-right
+        uint32_t b_L = (row_below_C << 1) | (row_below_L >> 31);
+        uint32_t b_C =  row_below_C;
+        uint32_t b_R = (row_below_C >> 1) | (row_below_R << 31);
 
         uint32_t ones = 0, twos = 0, fours = 0, eights = 0;
 
@@ -186,32 +145,39 @@ int main(int argc, char* argv[])
 
     int packed_width = (WIDTH + 31) / 32;
 
-    string outputFolder = "output_gpu_v4_dn";
+    string outputFolder = "output_gpu_v4-1_dn_square1";
     fs::create_directory(outputFolder);
 
     vector<uint8_t> flat(WIDTH * HEIGHT);
-    // mt19937 rng(67);
-    // uniform_int_distribution<int> dist(0, 2);
-    // for (auto& c : flat) c = (dist(rng) == 0) ? 1 : 0;
+    mt19937 rng(67);
+    //uniform_int_distribution<int> dist(0, 9);
+    //uniform_int_distribution<int> dist(0, 2);
+    //for (auto& c : flat) c = (dist(rng) == 0) ? 1 : 0;
 
-    int block_size = min(WIDTH, HEIGHT) / 4;
+    // int cx = WIDTH / 2, cy = HEIGHT / 2, r = min(WIDTH, HEIGHT) / 4;
+    // for (int y = 0; y < HEIGHT; y++)
+    //     for (int x = 0; x < WIDTH; x++)
+    //         flat[y * WIDTH + x] = ((x-cx)*(x-cx) + (y-cy)*(y-cy) <= r*r) ? 1 : 0;
 
-    for (int y = 0; y < HEIGHT; y++)
-        for (int x = 0; x < WIDTH; x++)
-            flat[y * WIDTH + x] = 0;
+    // Two solid blocks: top-left and bottom-right
+    int bs = min(WIDTH, HEIGHT) / 4;
+    int gap = 8;  // 兩個方塊之間的間距，可調整
 
-    // 左上方塊
-    int tl_x = WIDTH / 4 - block_size / 2;
-    int tl_y = HEIGHT / 4 - block_size / 2;
-    for (int y = tl_y; y < tl_y + block_size; y++)
-        for (int x = tl_x; x < tl_x + block_size; x++)
+    // 兩個方塊沿對角線排列，以畫面中心為基準往兩側偏移
+    // 左上方塊：右下角在中心左上方 gap/2 處
+    int tl_x = WIDTH  / 2 - gap / 2 - bs;
+    int tl_y = HEIGHT / 2 - gap / 2 - bs;
+
+    // 右下方塊：左上角在中心右下方 gap/2 處
+    int br_x = WIDTH  / 2 + gap / 2;
+    int br_y = HEIGHT / 2 + gap / 2;
+
+    for (int y = tl_y; y < tl_y + bs; y++)
+        for (int x = tl_x; x < tl_x + bs; x++)
             flat[y * WIDTH + x] = 1;
 
-    // 右下方塊
-    int br_x = 3 * WIDTH / 4 - block_size / 2;
-    int br_y = 3 * HEIGHT / 4 - block_size / 2;
-    for (int y = br_y; y < br_y + block_size; y++)
-        for (int x = br_x; x < br_x + block_size; x++)
+    for (int y = br_y; y < br_y + bs; y++)
+        for (int x = br_x; x < br_x + bs; x++)
             flat[y * WIDTH + x] = 1;
 
     vector<uint32_t> packed;
@@ -232,21 +198,19 @@ int main(int argc, char* argv[])
     dim3 block(BLOCK_X, BLOCK_Y);
     dim3 grid((packed_width + BLOCK_X*coarsen - 1) / (BLOCK_X*coarsen),(HEIGHT + BLOCK_Y - 1) / BLOCK_Y);
 
-    size_t sharedBytes = (BLOCK_X*coarsen + 2) * (BLOCK_Y + 2) * sizeof(uint32_t);
-
     cudaEventRecord(start);
 
     for (int iter = 1; iter <= ITERATIONS; iter++)
     {
-        conwayKernel<<<grid, block, sharedBytes>>>(d_cur, d_nxt, packed_width, HEIGHT, coarsen);
+        conwayKernel<<<grid, block>>>(d_cur, d_nxt, packed_width, HEIGHT, coarsen);
 
-        //cudaDeviceSynchronize();
+        cudaDeviceSynchronize();
 
         swap(d_cur, d_nxt);
 
-        // cudaMemcpy(packed.data(), d_cur, bytes, cudaMemcpyDeviceToHost);
-        // unpackGrid(packed, flat, WIDTH, HEIGHT);
-        // saveGrid(flat, iter, outputFolder, WIDTH, HEIGHT);
+        cudaMemcpy(packed.data(), d_cur, bytes, cudaMemcpyDeviceToHost);
+        unpackGrid(packed, flat, WIDTH, HEIGHT);
+        saveGrid(flat, iter, outputFolder, WIDTH, HEIGHT);
     }
 
     cudaEventRecord(stop);
